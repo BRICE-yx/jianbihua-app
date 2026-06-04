@@ -1,7 +1,7 @@
 {
-  "name": "目录查询",
-  "short_name": "目录查询",
-  "description": "输入名称或页码，快速查询对应目录号。",
+  "name": "简笔画",
+  "short_name": "简笔画",
+  "description": "输入名称或页码，快速查询简笔画目录号。",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
