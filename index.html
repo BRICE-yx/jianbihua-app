@@ -62,11 +62,14 @@
 
     .search-wrap {
       display: flex;
+      flex-wrap: wrap;
       gap: 8px;
       align-items: center;
     }
 
     input {
+      flex: 1 1 220px;
+      min-width: 0;
       width: 100%;
       height: 48px;
       padding: 0 14px;
@@ -101,10 +104,22 @@
       transform: translateY(1px);
     }
 
+    button:disabled {
+      cursor: wait;
+      opacity: 0.62;
+    }
+
     .status {
       margin: 10px 2px 0;
       color: var(--muted);
       font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .update-status {
+      margin: 4px 2px 0;
+      color: var(--muted);
+      font-size: 13px;
       line-height: 1.5;
     }
 
@@ -188,15 +203,21 @@
       <div class="search-wrap">
         <input id="search" type="search" placeholder="输入名称或页码，例如：鱼、企鹅、102" autocomplete="off" autofocus>
         <button id="clear" type="button">清空</button>
+        <button id="check-update" type="button">检查更新</button>
       </div>
       <div id="status" class="status"></div>
+      <div id="update-status" class="update-status"></div>
     </section>
 
     <section id="results" class="results" aria-live="polite"></section>
   </main>
 
   <script>
-    const DATA = [
+    const DEFAULT_VERSION = "2026-06-04.1";
+    const DATA_URL = "./catalog-data.json";
+    const STORAGE_KEY = "jianbihua.catalog.v1";
+
+    const DEFAULT_DATA = [
       { number: "002", name: "公鸡" },
       { number: "003", name: "母鸡" },
       { number: "004", name: "小鸡" },
@@ -507,10 +528,16 @@
       { number: "354", name: "表情" }
     ];
 
+    let currentVersion = DEFAULT_VERSION;
+    let currentData = DEFAULT_DATA;
+    let currentDataSource = "内置";
+
     const searchInput = document.querySelector("#search");
     const clearButton = document.querySelector("#clear");
+    const updateButton = document.querySelector("#check-update");
     const results = document.querySelector("#results");
     const status = document.querySelector("#status");
+    const updateStatus = document.querySelector("#update-status");
 
     function escapeHtml(value) {
       return value.replace(/[&<>"']/g, char => ({
@@ -551,7 +578,7 @@
       if (query) {
         status.textContent = `找到 ${items.length} 个结果，数字为页码/目录号`;
       } else {
-        status.textContent = `共 ${DATA.length} 条，输入一个字也可以查`;
+        status.textContent = `共 ${currentData.length} 条，输入一个字也可以查`;
       }
     }
 
@@ -567,10 +594,102 @@
 
     function update() {
       const query = searchInput.value.trim();
-      const items = DATA
+      const items = currentData
         .filter(item => !query || item.name.includes(query) || item.number.includes(query))
         .sort((a, b) => score(a, query) - score(b, query) || a.number.localeCompare(b.number));
       render(items, query);
+    }
+
+    function normalizeItem(item) {
+      return {
+        number: String(item.number || "").padStart(3, "0"),
+        name: String(item.name || "").trim()
+      };
+    }
+
+    function normalizeCatalog(payload) {
+      const items = Array.isArray(payload) ? payload : payload && payload.items;
+      if (!Array.isArray(items)) {
+        throw new Error("更新文件格式不正确");
+      }
+
+      const normalizedItems = items.map(normalizeItem).filter(item => item.number && item.name);
+      if (!normalizedItems.length) {
+        throw new Error("更新文件里没有可用数据");
+      }
+
+      return {
+        version: String((payload && payload.version) || ""),
+        items: normalizedItems
+      };
+    }
+
+    function dataSignature(items) {
+      return JSON.stringify(items);
+    }
+
+    function refreshUpdateStatus(message) {
+      updateStatus.textContent = message || `当前数据版本：${currentVersion}（${currentDataSource}）`;
+    }
+
+    function loadSavedCatalog() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+
+        const saved = JSON.parse(raw);
+        const catalog = normalizeCatalog(saved);
+        currentVersion = catalog.version || saved.savedAt || DEFAULT_VERSION;
+        currentData = catalog.items;
+        currentDataSource = "本地保存";
+      } catch (error) {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    }
+
+    function saveCatalog(payload) {
+      const catalog = normalizeCatalog(payload);
+      const saved = {
+        version: catalog.version || new Date().toISOString(),
+        savedAt: new Date().toISOString(),
+        items: catalog.items
+      };
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+      currentVersion = saved.version;
+      currentData = saved.items;
+      currentDataSource = "本地保存";
+      return saved;
+    }
+
+    async function checkForUpdates() {
+      updateButton.disabled = true;
+      refreshUpdateStatus("正在检查更新...");
+
+      try {
+        const response = await fetch(`${DATA_URL}?t=${Date.now()}`, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`网络请求失败（${response.status}）`);
+        }
+
+        const payload = await response.json();
+        const catalog = normalizeCatalog(payload);
+        const sameVersion = catalog.version && catalog.version === currentVersion;
+        const sameData = dataSignature(catalog.items) === dataSignature(currentData);
+
+        if (sameVersion && sameData) {
+          refreshUpdateStatus(`已是最新版：${currentVersion}`);
+          return;
+        }
+
+        const saved = saveCatalog(payload);
+        update();
+        refreshUpdateStatus(`已更新到最新版：${saved.version}，共 ${saved.items.length} 条`);
+      } catch (error) {
+        refreshUpdateStatus(`更新失败：${error.message || "请检查网络后重试"}`);
+      } finally {
+        updateButton.disabled = false;
+      }
     }
 
     searchInput.addEventListener("input", update);
@@ -579,7 +698,10 @@
       searchInput.focus();
       update();
     });
+    updateButton.addEventListener("click", checkForUpdates);
 
+    loadSavedCatalog();
+    refreshUpdateStatus();
     update();
 
     if ("serviceWorker" in navigator) {

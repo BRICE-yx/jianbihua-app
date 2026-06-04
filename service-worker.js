@@ -1,7 +1,8 @@
-const CACHE_NAME = "name-number-lookup-v3";
+const CACHE_NAME = "name-number-lookup-v4";
 const ASSETS = [
   "./",
   "./index.html",
+  "./catalog-data.json",
   "./manifest.webmanifest",
   "./icon-192.png",
   "./icon-512.png",
