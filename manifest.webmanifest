@@ -1,7 +1,7 @@
 {
   "name": "简笔画",
   "short_name": "简笔画",
-  "description": "输入名称或页码，快速查询简笔画目录号。",
+  "description": "按名称、页码、分类和书籍快速查询简笔画条目，并支持图片预览与离线缓存。",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -9,19 +9,19 @@
   "theme_color": "#167c6b",
   "icons": [
     {
-      "src": "./icon-192-v2.png",
+      "src": "./assets/icons/icon-192-v2.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "./icon-512-v2.png",
+      "src": "./assets/icons/icon-512-v2.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "./icon.svg",
+      "src": "./assets/icons/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"

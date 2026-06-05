@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "appId": "com.jianbihua.app",
+  "appName": "简笔画",
+  "versionCode": 2,
+  "versionName": "0.2.0",
+  "channel": "local-debug",
+  "generatedAt": "2026-06-05T23:37:33+08:00",
+  "data": {
+    "generatedAt": "2026-06-05T15:17:56+00:00",
+    "books": 5,
+    "categories": 51,
+    "items": 1501,
+    "images": 1309,
+    "imageBytes": 438946984
+  },
+  "webUrl": "https://brice-yx.github.io/name-number-lookup/",
+  "updateManifestUrl": "https://brice-yx.github.io/name-number-lookup/version.json",
+  "apkUrl": "",
+  "releaseNotes": [
+    "五本书全量数据已导出到 App。",
+    "修复 ebook_001 中“小鸡”缺失和企鹅图片误关联。",
+    "详情页改为图片优先，只保留名称和大图。",
+    "Android 返回键会先关闭图片或彩蛋弹层。",
+    "设置页开始显示本地版本号，并预留远程更新清单。"
+  ]
+}
