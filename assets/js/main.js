@@ -2,7 +2,7 @@
 const LEGACY_DATA_URL = "./data/catalog-data.json";
 const OFFLINE_ASSETS_URL = "./data/offline-assets.json";
 const APP_VERSION_URL = "./version.json";
-const SHELL_CACHE_NAME = "jianbihua-shell-v9";
+const SHELL_CACHE_NAME = "jianbihua-shell-v10";
 const IMAGE_CACHE_NAME = "jianbihua-images-v1";
 const SAVED_DATA_KEY = "jianbihua.appDataSnapshot.v1";
 const STATS_KEY = "jianbihua.localStats.v1";
@@ -120,7 +120,9 @@ const state = {
   homeStatusIndex: -1,
   homeStatusTimer: 0,
   brandTapCount: 0,
-  brandTapTimer: 0
+  brandTapTimer: 0,
+  cacheJob: null,
+  scrollLockY: 0
 };
 
 const el = {
@@ -155,6 +157,7 @@ const el = {
   checkUpdate: document.querySelector("#check-update"),
   updateStatus: document.querySelector("#update-status"),
   cacheAll: document.querySelector("#cache-all"),
+  cacheAllLabel: document.querySelector("#cache-all-label"),
   clearCache: document.querySelector("#clear-cache"),
   cacheStatus: document.querySelector("#cache-status"),
   cacheProgressBar: document.querySelector("#cache-progress-bar"),
@@ -915,6 +918,12 @@ function renderLibrary() {
   el.libraryItems.innerHTML = items.map(item => itemCardHtml(item, "", "item-card")).join("");
 }
 
+function setCacheAllButton(label, options = {}) {
+  if (el.cacheAllLabel) el.cacheAllLabel.textContent = label;
+  el.cacheAll.classList.toggle("is-pausing", Boolean(options.pausing));
+  el.cacheAll.disabled = Boolean(options.disabled);
+}
+
 function renderSettings() {
   const stats = state.data?.stats || {};
   const generatedAt = state.data?.generatedAt ? formatDateTime(state.data.generatedAt) : "未记录";
@@ -926,7 +935,7 @@ function renderSettings() {
   el.cacheStatus.textContent ||= IS_ANDROID_ASSET
     ? builtInImageStatus()
     : `${formatNumber(stats.images || 0)} 张图片 · ${imageBytes}`;
-  el.cacheAll.disabled = false;
+  if (!state.cacheJob?.running) setCacheAllButton("缓存全部图片");
   el.cacheAll.title = IS_ANDROID_ASSET ? "APK 已内置图片，点击可恢复状态提示" : "";
   el.appStatus.innerHTML = `
     <div>${escapeHtml(versionLine)}</div>
@@ -949,6 +958,22 @@ function attachImageFallbacks() {
   document.querySelectorAll(".thumb img").forEach(image => {
     image.addEventListener("error", () => image.parentElement?.classList.add("image-error"), { once: true });
   });
+}
+
+function lockPageScroll() {
+  if (document.body.classList.contains("modal-open")) return;
+  state.scrollLockY = window.scrollY || document.documentElement.scrollTop || 0;
+  document.body.style.top = `-${state.scrollLockY}px`;
+  document.body.classList.add("modal-open");
+}
+
+function unlockPageScroll() {
+  if (el.dialog.open || el.easterDialog.open) return;
+  const scrollY = state.scrollLockY || 0;
+  document.body.classList.remove("modal-open");
+  document.body.style.top = "";
+  window.scrollTo(0, scrollY);
+  state.scrollLockY = 0;
 }
 
 function setView(view) {
@@ -999,7 +1024,10 @@ function openItem(itemId) {
   state.detailItem = item;
   state.detailImageIndex = 0;
   renderDialog();
-  if (!el.dialog.open) el.dialog.showModal();
+  if (!el.dialog.open) {
+    lockPageScroll();
+    el.dialog.showModal();
+  }
 }
 
 function renderDialog() {
@@ -1037,7 +1065,10 @@ function changeDetailImage(delta) {
 function openHiddenGallery(index = 0) {
   state.easterImageIndex = Math.min(HIDDEN_GALLERY.length - 1, Math.max(0, index));
   renderEasterDialog();
-  if (!el.easterDialog.open) el.easterDialog.showModal();
+  if (!el.easterDialog.open) {
+    lockPageScroll();
+    el.easterDialog.showModal();
+  }
 }
 
 function openHiddenGalleryImage(id) {
@@ -1210,6 +1241,14 @@ async function putJsonInCache(url, payload) {
 }
 
 async function cacheAllImages() {
+  if (state.cacheJob?.running) {
+    state.cacheJob.cancelled = true;
+    state.cacheJob.controller?.abort();
+    setCacheAllButton("正在暂停", { pausing: true, disabled: true });
+    el.cacheStatus.textContent = "正在暂停缓存，当前请求结束后停止";
+    return;
+  }
+
   if (IS_ANDROID_ASSET) {
     el.cacheProgressBar.style.width = "100%";
     el.cacheStatus.textContent = builtInImageStatus();
@@ -1219,10 +1258,14 @@ async function cacheAllImages() {
     el.cacheStatus.textContent = "当前浏览器不支持缓存管理";
     return;
   }
-  el.cacheAll.disabled = true;
+
+  const job = { running: true, cancelled: false, controller: null };
+  state.cacheJob = job;
+  setCacheAllButton("暂停缓存", { pausing: true });
+  el.clearCache.disabled = true;
   el.cacheProgressBar.style.width = "0%";
   try {
-    const manifest = await fetchJson(`${OFFLINE_ASSETS_URL}?t=${Date.now()}`);
+    const manifest = await fetchJson(appendCacheBuster(OFFLINE_ASSETS_URL));
     const assets = (Array.isArray(manifest.images) ? manifest.images : [])
       .filter(asset => asset && asset.url && asset.exists !== false);
     const total = assets.length;
@@ -1230,28 +1273,45 @@ async function cacheAllImages() {
     let done = 0;
     let failed = 0;
     for (const asset of assets) {
+      if (job.cancelled) break;
+      let processed = false;
       try {
         const request = new Request(asset.url, { cache: "no-store" });
         const cached = await cache.match(asset.url);
         if (!cached) {
-          const response = await fetch(request);
+          job.controller = new AbortController();
+          const response = await fetch(request, { signal: job.controller.signal });
           if (!response.ok) throw new Error(String(response.status));
           await cache.put(asset.url, response);
         }
+        processed = true;
       } catch (error) {
+        if (job.cancelled) break;
         failed += 1;
+        processed = true;
+      } finally {
+        job.controller = null;
       }
+      if (!processed) continue;
       done += 1;
       const percent = total ? Math.round((done / total) * 100) : 100;
       el.cacheProgressBar.style.width = `${percent}%`;
       el.cacheStatus.textContent = `已缓存 ${formatNumber(done)} / ${formatNumber(total)}${failed ? `，失败 ${formatNumber(failed)}` : ""}`;
       await new Promise(resolve => setTimeout(resolve, 0));
     }
-    el.cacheStatus.textContent = `完成：${formatNumber(done - failed)} / ${formatNumber(total)} 张`;
+    if (job.cancelled) {
+      el.cacheStatus.textContent = `已暂停：已处理 ${formatNumber(done)} / ${formatNumber(total)}${failed ? `，失败 ${formatNumber(failed)}` : ""}`;
+    } else {
+      el.cacheStatus.textContent = `完成：${formatNumber(done - failed)} / ${formatNumber(total)} 张`;
+    }
   } catch (error) {
-    el.cacheStatus.textContent = `缓存失败：${error.message || "读取清单失败"}`;
+    el.cacheStatus.textContent = job.cancelled
+      ? "已暂停缓存"
+      : `缓存失败：${error.message || "读取清单失败"}`;
   } finally {
-    el.cacheAll.disabled = false;
+    if (state.cacheJob === job) state.cacheJob = null;
+    setCacheAllButton("缓存全部图片");
+    el.clearCache.disabled = false;
   }
 }
 
@@ -1409,10 +1469,12 @@ el.clearStats.addEventListener("click", () => {
 el.dialog.addEventListener("click", event => {
   if (event.target === el.dialog) el.dialog.close();
 });
+el.dialog.addEventListener("close", unlockPageScroll);
 
 el.easterDialog.addEventListener("click", event => {
   if (event.target === el.easterDialog) el.easterDialog.close();
 });
+el.easterDialog.addEventListener("close", unlockPageScroll);
 
 document.addEventListener("keydown", event => {
   if (el.dialog.open) {

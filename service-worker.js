@@ -1,4 +1,4 @@
-const SHELL_CACHE = "jianbihua-shell-v9";
+const SHELL_CACHE = "jianbihua-shell-v10";
 const IMAGE_CACHE = "jianbihua-images-v1";
 const LEGACY_CACHES = [
   "name-number-lookup-v1",
