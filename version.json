@@ -16,7 +16,7 @@
   },
   "webUrl": "https://brice-yx.github.io/name-number-lookup/",
   "updateManifestUrl": "https://brice-yx.github.io/name-number-lookup/version.json",
-  "apkUrl": "",
+  "apkUrl": "https://github.com/BRICE-yx/name-number-lookup/releases/download/v0.2.0/jianbihua-v0.2.0-debug.apk",
   "releaseNotes": [
     "五本书全量数据已导出到 App。",
     "修复 ebook_001 中“小鸡”缺失和企鹅图片误关联。",
