@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "appId": "com.jianbihua.app",
   "appName": "简笔画",
-  "versionCode": 3,
-  "versionName": "0.2.1",
+  "versionCode": 4,
+  "versionName": "0.2.2",
   "channel": "local-debug",
-  "generatedAt": "2026-06-06T00:45:04+08:00",
+  "generatedAt": "2026-06-06T00:54:45+08:00",
   "data": {
     "generatedAt": "2026-06-05T15:17:56+00:00",
     "books": 5,
@@ -16,10 +16,10 @@
   },
   "webUrl": "https://brice-yx.github.io/name-number-lookup/",
   "updateManifestUrl": "https://brice-yx.github.io/name-number-lookup/version.json",
-  "apkUrl": "https://github.com/BRICE-yx/name-number-lookup/releases/download/v0.2.1/jianbihua-v0.2.1-debug.apk",
+  "apkUrl": "https://github.com/BRICE-yx/name-number-lookup/releases/download/v0.2.2/jianbihua-v0.2.2-debug.apk",
   "releaseNotes": [
-    "修复网页端详情图片打开后背景页面被滚动的问题。",
-    "详情图片区域改为弹层内滚动，方便查看整页图。",
-    "缓存全部图片时按钮会切换为暂停缓存，点错后可以停止。"
+    "进一步修复详情弹层滚动穿透，打开图片后背景页面不再跟着滑动。",
+    "详情图片区域保持弹层内独立滚动，方便查看长图。",
+    "APK WebView 显式开启双指缩放，并隐藏屏幕缩放按钮。"
   ]
 }

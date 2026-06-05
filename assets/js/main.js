@@ -2,7 +2,7 @@
 const LEGACY_DATA_URL = "./data/catalog-data.json";
 const OFFLINE_ASSETS_URL = "./data/offline-assets.json";
 const APP_VERSION_URL = "./version.json";
-const SHELL_CACHE_NAME = "jianbihua-shell-v10";
+const SHELL_CACHE_NAME = "jianbihua-shell-v11";
 const IMAGE_CACHE_NAME = "jianbihua-images-v1";
 const SAVED_DATA_KEY = "jianbihua.appDataSnapshot.v1";
 const STATS_KEY = "jianbihua.localStats.v1";
@@ -122,7 +122,8 @@ const state = {
   brandTapCount: 0,
   brandTapTimer: 0,
   cacheJob: null,
-  scrollLockY: 0
+  scrollLockY: 0,
+  modalTouchY: 0
 };
 
 const el = {
@@ -964,6 +965,7 @@ function lockPageScroll() {
   if (document.body.classList.contains("modal-open")) return;
   state.scrollLockY = window.scrollY || document.documentElement.scrollTop || 0;
   document.body.style.top = `-${state.scrollLockY}px`;
+  document.documentElement.classList.add("modal-open");
   document.body.classList.add("modal-open");
 }
 
@@ -971,9 +973,59 @@ function unlockPageScroll() {
   if (el.dialog.open || el.easterDialog.open) return;
   const scrollY = state.scrollLockY || 0;
   document.body.classList.remove("modal-open");
+  document.documentElement.classList.remove("modal-open");
   document.body.style.top = "";
   window.scrollTo(0, scrollY);
   state.scrollLockY = 0;
+  state.modalTouchY = 0;
+}
+
+function openModalDialog() {
+  if (el.dialog.open) return el.dialog;
+  if (el.easterDialog.open) return el.easterDialog;
+  return null;
+}
+
+function modalScrollTarget(target) {
+  const dialog = openModalDialog();
+  if (!dialog || !(target instanceof Element)) return null;
+  const scrollTarget = target.closest(".image-stage, .easter-side");
+  return scrollTarget && dialog.contains(scrollTarget) ? scrollTarget : null;
+}
+
+function shouldBlockModalScroll(deltaY, scrollTarget) {
+  if (!scrollTarget || Math.abs(deltaY) < 0.5) return true;
+  const maxScrollTop = scrollTarget.scrollHeight - scrollTarget.clientHeight;
+  if (maxScrollTop <= 1) return true;
+  if (deltaY < 0 && scrollTarget.scrollTop <= 0) return true;
+  if (deltaY > 0 && scrollTarget.scrollTop >= maxScrollTop - 1) return true;
+  return false;
+}
+
+function trapModalWheel(event) {
+  const dialog = openModalDialog();
+  if (!dialog) return;
+  const scrollTarget = modalScrollTarget(event.target);
+  if (!dialog.contains(event.target) || shouldBlockModalScroll(event.deltaY, scrollTarget)) {
+    event.preventDefault();
+  }
+}
+
+function trapModalTouchStart(event) {
+  if (!openModalDialog() || !event.touches?.length) return;
+  state.modalTouchY = event.touches[0].clientY;
+}
+
+function trapModalTouchMove(event) {
+  const dialog = openModalDialog();
+  if (!dialog || !event.touches?.length) return;
+  const currentY = event.touches[0].clientY;
+  const deltaY = state.modalTouchY - currentY;
+  state.modalTouchY = currentY;
+  const scrollTarget = modalScrollTarget(event.target);
+  if (!dialog.contains(event.target) || shouldBlockModalScroll(deltaY, scrollTarget)) {
+    event.preventDefault();
+  }
 }
 
 function setView(view) {
@@ -1045,6 +1097,8 @@ function renderDialog() {
   } else {
     el.modalImageStage.innerHTML = `<div class="empty-state"><div class="empty-title">无图</div><div>${escapeHtml(item.bookTitle)}</div></div>`;
   }
+  el.modalImageStage.scrollTop = 0;
+  el.modalImageStage.scrollLeft = 0;
   const total = item.images.length;
   const showPager = total > 1;
   el.prevImage.hidden = !showPager;
@@ -1475,6 +1529,10 @@ el.easterDialog.addEventListener("click", event => {
   if (event.target === el.easterDialog) el.easterDialog.close();
 });
 el.easterDialog.addEventListener("close", unlockPageScroll);
+
+document.addEventListener("wheel", trapModalWheel, { passive: false });
+document.addEventListener("touchstart", trapModalTouchStart, { passive: true });
+document.addEventListener("touchmove", trapModalTouchMove, { passive: false });
 
 document.addEventListener("keydown", event => {
   if (el.dialog.open) {
