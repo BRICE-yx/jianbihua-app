@@ -9,6 +9,7 @@ const STATS_KEY = "jianbihua.localStats.v1";
 const SW_RELOAD_KEY = `jianbihua.swReloaded.${SHELL_CACHE_NAME}`;
 const DEFAULT_TERMS = ["企鹅", "蝙蝠", "蠼螋", "航天器"];
 const MAX_RESULTS = 160;
+const SEARCH_BOOK_ORDER = ["ebook_004", "ebook_003", "ebook_002", "ebook_001", "paper_001"];
 const IS_ANDROID_ASSET = location.hostname === "appassets.androidplatform.net";
 const IS_LOCAL_PREVIEW = ["127.0.0.1", "localhost", "::1"].includes(location.hostname);
 const DETAIL_ZOOM_MIN = 1;
@@ -133,7 +134,9 @@ const state = {
   detailPanStartX: 0,
   detailPanStartY: 0,
   detailPanStartScrollLeft: 0,
-  detailPanStartScrollTop: 0
+  detailPanStartScrollTop: 0,
+  detailPinchStartDistance: 0,
+  detailPinchStartScale: 1
 };
 
 const el = {
@@ -245,6 +248,19 @@ function appVersionLabel(version = state.appVersion) {
 
 function formatAppVersion(version = state.appVersion) {
   return `版本：${appVersionLabel(version)}`;
+}
+
+function searchBookRank(bookId) {
+  const index = SEARCH_BOOK_ORDER.indexOf(String(bookId || ""));
+  return index >= 0 ? index : SEARCH_BOOK_ORDER.length;
+}
+
+function compareSearchBooks(aBookId, bBookId) {
+  const rankDiff = searchBookRank(aBookId) - searchBookRank(bBookId);
+  if (rankDiff) return rankDiff;
+  const bookA = state.booksById.get(aBookId);
+  const bookB = state.booksById.get(bBookId);
+  return (bookA?.sortOrder || 0) - (bookB?.sortOrder || 0) || String(aBookId).localeCompare(String(bBookId));
 }
 
 function appendCacheBuster(url) {
@@ -528,12 +544,14 @@ async function loadData() {
 
 function setData(data) {
   state.data = data;
-  state.books = data.books.slice().sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || String(a.id).localeCompare(String(b.id)));
-  state.categories = data.categories.slice().sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || String(a.id).localeCompare(String(b.id)));
+  state.books = data.books.slice().sort((a, b) => compareSearchBooks(a.id, b.id));
+  state.categories = data.categories.slice().sort((a, b) =>
+    compareSearchBooks(a.bookId, b.bookId) ||
+    (a.sortOrder || 0) - (b.sortOrder || 0) ||
+    String(a.id).localeCompare(String(b.id))
+  );
   state.items = data.items.slice().sort((a, b) => {
-    const bookA = state.books.find(book => book.id === a.bookId)?.sortOrder || 0;
-    const bookB = state.books.find(book => book.id === b.bookId)?.sortOrder || 0;
-    return bookA - bookB || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, "zh-CN");
+    return compareSearchBooks(a.bookId, b.bookId) || a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, "zh-CN");
   });
   state.booksById = new Map(state.books.map(book => [book.id, book]));
   state.itemsById = new Map(state.items.map(item => [item.id, item]));
@@ -703,18 +721,20 @@ function getSearchMatches() {
   if (!query) return { books: [], categories: [], items: [] };
   const books = state.books
     .filter(book => book._searchBlob?.includes(query))
-    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+    .sort((a, b) => compareSearchBooks(a.id, b.id));
   const categories = state.categories
     .filter(category => category._searchBlob?.includes(query))
     .sort((a, b) => {
-      const bookA = state.booksById.get(a.bookId)?.sortOrder || 0;
-      const bookB = state.booksById.get(b.bookId)?.sortOrder || 0;
-      return bookA - bookB || (a.sortOrder || 0) - (b.sortOrder || 0);
+      return compareSearchBooks(a.bookId, b.bookId) || (a.sortOrder || 0) - (b.sortOrder || 0);
     })
     .slice(0, 40);
   const items = state.items
     .filter(item => item._searchBlob.includes(query))
-    .sort((a, b) => searchScore(a, query) - searchScore(b, query) || a.sortOrder - b.sortOrder)
+    .sort((a, b) =>
+      searchScore(a, query) - searchScore(b, query) ||
+      compareSearchBooks(a.bookId, b.bookId) ||
+      a.sortOrder - b.sortOrder
+    )
     .slice(0, MAX_RESULTS);
   return { books, categories, items };
 }
@@ -825,8 +845,9 @@ function renderResults() {
   const matches = getSearchMatches();
   const special = getSpecialResults(query);
   const total = matches.books.length + matches.categories.length + matches.items.length + special.count;
+  const imageItemCount = matches.items.filter(item => item.images.length).length;
   el.resultsTitle.textContent = "结果";
-  el.resultsSummary.textContent = total ? `${formatNumber(total)} 个命中` : `未找到“${query}”`;
+  el.resultsSummary.textContent = total ? `共${formatNumber(imageItemCount)}条有图条目` : `未找到“${query}”`;
   if (!total) {
     el.results.innerHTML = `<div class="empty-state"><div class="empty-title">未找到“${escapeHtml(query)}”</div></div>`;
     return;
@@ -849,7 +870,7 @@ function renderResults() {
   }
   if (matches.categories.length) {
     const byCategoryBook = groupBy(matches.categories, "bookId");
-    for (const book of state.books.filter(book => byCategoryBook.has(book.id))) {
+    for (const book of state.books.filter(book => byCategoryBook.has(book.id)).sort((a, b) => compareSearchBooks(a.id, b.id))) {
       const categories = byCategoryBook.get(book.id);
       groups.push(`
         <section class="result-group">
@@ -868,6 +889,7 @@ function renderResults() {
   const byBook = groupBy(matches.items, "bookId");
   groups.push(...state.books
     .filter(book => byBook.has(book.id))
+    .sort((a, b) => compareSearchBooks(a.id, b.id))
     .map(book => {
       const items = byBook.get(book.id);
       return `
@@ -1068,7 +1090,7 @@ function trapModalTouchMove(event) {
 }
 
 function customDetailZoomEnabled() {
-  return !IS_ANDROID_ASSET;
+  return true;
 }
 
 function detailZoomImage() {
@@ -1078,7 +1100,8 @@ function detailZoomImage() {
 function updateDetailZoomControls() {
   const image = detailZoomImage();
   const enabled = customDetailZoomEnabled() && !!image;
-  if (el.zoomTools) el.zoomTools.hidden = !enabled;
+  const showControls = enabled && !IS_ANDROID_ASSET;
+  if (el.zoomTools) el.zoomTools.hidden = !showControls;
   if (!enabled) {
     el.modalImageStage.classList.remove("is-zoomed", "can-pan", "is-panning");
     return;
@@ -1135,6 +1158,8 @@ function setDetailZoom(nextScale, origin = null) {
 function resetDetailZoom() {
   state.detailZoomScale = DETAIL_ZOOM_MIN;
   state.detailPanPointerId = null;
+  state.detailPinchStartDistance = 0;
+  state.detailPinchStartScale = DETAIL_ZOOM_MIN;
   el.modalImageStage.classList.remove("is-panning");
   applyDetailZoomVisual();
   el.modalImageStage.scrollLeft = 0;
@@ -1157,6 +1182,43 @@ function handleDetailZoomDoubleClick(event) {
   event.preventDefault();
   const nextScale = state.detailZoomScale > 1.4 ? DETAIL_ZOOM_MIN : 2;
   setDetailZoom(nextScale, event);
+}
+
+function detailTouchPointDistance(touches) {
+  const dx = touches[0].clientX - touches[1].clientX;
+  const dy = touches[0].clientY - touches[1].clientY;
+  return Math.hypot(dx, dy);
+}
+
+function detailTouchPointCenter(touches) {
+  return {
+    clientX: (touches[0].clientX + touches[1].clientX) / 2,
+    clientY: (touches[0].clientY + touches[1].clientY) / 2
+  };
+}
+
+function handleDetailZoomTouchStart(event) {
+  if (!customDetailZoomEnabled() || !el.dialog.open || !detailZoomImage()) return;
+  if (event.touches.length !== 2 || !(event.target instanceof Element)) return;
+  if (!event.target.closest(".image-stage")) return;
+  state.detailPinchStartDistance = detailTouchPointDistance(event.touches);
+  state.detailPinchStartScale = state.detailZoomScale || DETAIL_ZOOM_MIN;
+  event.preventDefault();
+}
+
+function handleDetailZoomTouchMove(event) {
+  if (!customDetailZoomEnabled() || !el.dialog.open || !detailZoomImage()) return;
+  if (event.touches.length !== 2 || state.detailPinchStartDistance <= 0) return;
+  event.preventDefault();
+  const distance = detailTouchPointDistance(event.touches);
+  const nextScale = state.detailPinchStartScale * (distance / state.detailPinchStartDistance);
+  setDetailZoom(nextScale, detailTouchPointCenter(event.touches));
+}
+
+function handleDetailZoomTouchEnd(event) {
+  if (event.touches.length >= 2) return;
+  state.detailPinchStartDistance = 0;
+  state.detailPinchStartScale = state.detailZoomScale || DETAIL_ZOOM_MIN;
 }
 
 function startDetailImagePan(event) {
@@ -1205,6 +1267,7 @@ function selectSearchTerm(term) {
   state.query = term;
   el.searchInput.value = term;
   setView("home");
+  el.searchInput.blur();
   recordSearch(term, true);
   renderQuickTerms();
   renderResults();
@@ -1612,6 +1675,7 @@ async function registerServiceWorker() {
 el.searchForm.addEventListener("submit", event => {
   event.preventDefault();
   recordSearch(state.query, true);
+  el.searchInput.blur();
   renderQuickTerms();
   renderResults();
   attachImageFallbacks();
@@ -1716,6 +1780,10 @@ el.zoomReset?.addEventListener("click", resetDetailZoom);
 el.zoomIn?.addEventListener("click", () => zoomDetailBy(DETAIL_ZOOM_STEP));
 el.modalImageStage.addEventListener("wheel", handleDetailZoomWheel, { passive: false });
 el.modalImageStage.addEventListener("dblclick", handleDetailZoomDoubleClick);
+el.modalImageStage.addEventListener("touchstart", handleDetailZoomTouchStart, { passive: false });
+el.modalImageStage.addEventListener("touchmove", handleDetailZoomTouchMove, { passive: false });
+el.modalImageStage.addEventListener("touchend", handleDetailZoomTouchEnd);
+el.modalImageStage.addEventListener("touchcancel", handleDetailZoomTouchEnd);
 el.modalImageStage.addEventListener("pointerdown", startDetailImagePan);
 el.modalImageStage.addEventListener("pointermove", moveDetailImagePan);
 el.modalImageStage.addEventListener("pointerup", endDetailImagePan);
