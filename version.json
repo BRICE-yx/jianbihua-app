@@ -3,8 +3,8 @@
   "appId": "com.jianbihua.app",
   "appName": "简笔画",
   "contactEmail": "1955225082@qq.com",
-  "versionCode": 5,
-  "versionName": "0.2.3",
+  "versionCode": 6,
+  "versionName": "0.2.4",
   "channel": "local-debug",
   "generatedAt": "2026-06-06T13:25:29+08:00",
   "data": {
@@ -17,11 +17,12 @@
   },
   "webUrl": "https://brice-yx.github.io/name-number-lookup/",
   "updateManifestUrl": "https://brice-yx.github.io/name-number-lookup/version.json",
-  "apkUrl": "https://github.com/BRICE-yx/name-number-lookup/releases/download/v0.2.3/jianbihua-v0.2.3-debug.apk",
+  "apkUrl": "https://github.com/BRICE-yx/name-number-lookup/releases/download/v0.2.4/jianbihua-v0.2.4-debug.apk",
   "releaseNotes": [
     "优化详情图片缩放与拖动体验，手机端点开条目后可正常缩放和移动大图。",
     "网页端详情图增加图片级缩放，放大后可继续查看细节。",
     "网页/PWA 增加 Service Worker 自动更新刷新，减少旧缓存影响。",
-    "简化首页搜索界面和默认快速入口显示。"
+    "简化首页搜索界面和默认快速入口显示。",
+    "偏好书籍排序"
   ]
 }
