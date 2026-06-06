@@ -2,14 +2,18 @@
 const LEGACY_DATA_URL = "./data/catalog-data.json";
 const OFFLINE_ASSETS_URL = "./data/offline-assets.json";
 const APP_VERSION_URL = "./version.json";
-const SHELL_CACHE_NAME = "jianbihua-shell-v11";
+const SHELL_CACHE_NAME = "jianbihua-shell-v12";
 const IMAGE_CACHE_NAME = "jianbihua-images-v1";
 const SAVED_DATA_KEY = "jianbihua.appDataSnapshot.v1";
 const STATS_KEY = "jianbihua.localStats.v1";
+const SW_RELOAD_KEY = `jianbihua.swReloaded.${SHELL_CACHE_NAME}`;
 const DEFAULT_TERMS = ["企鹅", "蝙蝠", "蠼螋", "航天器"];
 const MAX_RESULTS = 160;
 const IS_ANDROID_ASSET = location.hostname === "appassets.androidplatform.net";
 const IS_LOCAL_PREVIEW = ["127.0.0.1", "localhost", "::1"].includes(location.hostname);
+const DETAIL_ZOOM_MIN = 1;
+const DETAIL_ZOOM_MAX = 12;
+const DETAIL_ZOOM_STEP = 1.25;
 const SECRET_SEARCH_MESSAGES = new Map([
   ["宝", "今天也要一起画点小可爱~"],
   ["杨", "小羊宝~"],
@@ -123,7 +127,13 @@ const state = {
   brandTapTimer: 0,
   cacheJob: null,
   scrollLockY: 0,
-  modalTouchY: 0
+  modalTouchY: 0,
+  detailZoomScale: 1,
+  detailPanPointerId: null,
+  detailPanStartX: 0,
+  detailPanStartY: 0,
+  detailPanStartScrollLeft: 0,
+  detailPanStartScrollTop: 0
 };
 
 const el = {
@@ -170,6 +180,11 @@ const el = {
   modalImageStage: document.querySelector("#modal-image-stage"),
   modalTitle: document.querySelector("#modal-title"),
   modalMeta: document.querySelector("#modal-meta"),
+  zoomTools: document.querySelector("#zoom-tools"),
+  zoomOut: document.querySelector("#zoom-out"),
+  zoomReset: document.querySelector("#zoom-reset"),
+  zoomIn: document.querySelector("#zoom-in"),
+  zoomStatus: document.querySelector("#zoom-status"),
   closeDialog: document.querySelector("#close-dialog"),
   prevImage: document.querySelector("#prev-image"),
   nextImage: document.querySelector("#next-image"),
@@ -1005,6 +1020,7 @@ function shouldBlockModalScroll(deltaY, scrollTarget) {
 function trapModalWheel(event) {
   const dialog = openModalDialog();
   if (!dialog) return;
+  if (event.ctrlKey || event.metaKey) return;
   const scrollTarget = modalScrollTarget(event.target);
   if (!dialog.contains(event.target) || shouldBlockModalScroll(event.deltaY, scrollTarget)) {
     event.preventDefault();
@@ -1013,19 +1029,154 @@ function trapModalWheel(event) {
 
 function trapModalTouchStart(event) {
   if (!openModalDialog() || !event.touches?.length) return;
+  if (event.touches.length > 1) {
+    state.modalTouchY = 0;
+    return;
+  }
   state.modalTouchY = event.touches[0].clientY;
 }
 
 function trapModalTouchMove(event) {
   const dialog = openModalDialog();
   if (!dialog || !event.touches?.length) return;
+  if (event.touches.length > 1) {
+    state.modalTouchY = 0;
+    return;
+  }
   const currentY = event.touches[0].clientY;
+  const imageTouchTarget = event.target instanceof Element
+    ? event.target.closest(".image-stage, .easter-image-stage")
+    : null;
+  if (imageTouchTarget && dialog.contains(imageTouchTarget)) {
+    state.modalTouchY = currentY;
+    return;
+  }
   const deltaY = state.modalTouchY - currentY;
   state.modalTouchY = currentY;
   const scrollTarget = modalScrollTarget(event.target);
   if (!dialog.contains(event.target) || shouldBlockModalScroll(deltaY, scrollTarget)) {
     event.preventDefault();
   }
+}
+
+function customDetailZoomEnabled() {
+  return !IS_ANDROID_ASSET;
+}
+
+function detailZoomImage() {
+  return el.modalImageStage.querySelector("img");
+}
+
+function updateDetailZoomControls() {
+  const image = detailZoomImage();
+  const enabled = customDetailZoomEnabled() && !!image;
+  if (el.zoomTools) el.zoomTools.hidden = !enabled;
+  if (!enabled) {
+    el.modalImageStage.classList.remove("is-zoomed", "can-pan", "is-panning");
+    return;
+  }
+  const scale = state.detailZoomScale || DETAIL_ZOOM_MIN;
+  const isZoomed = scale > DETAIL_ZOOM_MIN + 0.01;
+  el.modalImageStage.classList.toggle("is-zoomed", isZoomed);
+  el.modalImageStage.classList.toggle("can-pan", isZoomed);
+  image.classList.toggle("is-zoomed", isZoomed);
+  if (!el.zoomStatus || !el.zoomOut || !el.zoomIn) return;
+  el.zoomStatus.textContent = `${Math.round(scale * 100)}%`;
+  el.zoomOut.disabled = scale <= DETAIL_ZOOM_MIN + 0.01;
+  el.zoomIn.disabled = scale >= DETAIL_ZOOM_MAX - 0.01;
+}
+
+function applyDetailZoomVisual() {
+  const image = detailZoomImage();
+  if (!image) {
+    updateDetailZoomControls();
+    return;
+  }
+  const scale = state.detailZoomScale || DETAIL_ZOOM_MIN;
+  image.style.width = `${scale * 100}%`;
+  image.style.maxWidth = scale > DETAIL_ZOOM_MIN + 0.01 ? "none" : "";
+  updateDetailZoomControls();
+}
+
+function setDetailZoom(nextScale, origin = null) {
+  if (!customDetailZoomEnabled()) return;
+  const image = detailZoomImage();
+  if (!image) return;
+  const previousScale = state.detailZoomScale || DETAIL_ZOOM_MIN;
+  const scale = Math.min(DETAIL_ZOOM_MAX, Math.max(DETAIL_ZOOM_MIN, nextScale));
+  if (Math.abs(scale - previousScale) < 0.001) return;
+
+  const stageRect = el.modalImageStage.getBoundingClientRect();
+  const originX = origin?.clientX == null
+    ? stageRect.width / 2
+    : Math.min(Math.max(origin.clientX - stageRect.left, 0), stageRect.width);
+  const originY = origin?.clientY == null
+    ? stageRect.height / 2
+    : Math.min(Math.max(origin.clientY - stageRect.top, 0), stageRect.height);
+  const contentX = el.modalImageStage.scrollLeft + originX;
+  const contentY = el.modalImageStage.scrollTop + originY;
+
+  state.detailZoomScale = scale;
+  applyDetailZoomVisual();
+
+  const ratio = scale / previousScale;
+  el.modalImageStage.scrollLeft = contentX * ratio - originX;
+  el.modalImageStage.scrollTop = contentY * ratio - originY;
+}
+
+function resetDetailZoom() {
+  state.detailZoomScale = DETAIL_ZOOM_MIN;
+  state.detailPanPointerId = null;
+  el.modalImageStage.classList.remove("is-panning");
+  applyDetailZoomVisual();
+  el.modalImageStage.scrollLeft = 0;
+  el.modalImageStage.scrollTop = 0;
+}
+
+function zoomDetailBy(factor, origin = null) {
+  setDetailZoom((state.detailZoomScale || DETAIL_ZOOM_MIN) * factor, origin);
+}
+
+function handleDetailZoomWheel(event) {
+  if (!customDetailZoomEnabled() || !el.dialog.open || !(event.ctrlKey || event.metaKey)) return;
+  if (!detailZoomImage()) return;
+  event.preventDefault();
+  zoomDetailBy(event.deltaY < 0 ? DETAIL_ZOOM_STEP : 1 / DETAIL_ZOOM_STEP, event);
+}
+
+function handleDetailZoomDoubleClick(event) {
+  if (!customDetailZoomEnabled() || !el.dialog.open || !detailZoomImage()) return;
+  event.preventDefault();
+  const nextScale = state.detailZoomScale > 1.4 ? DETAIL_ZOOM_MIN : 2;
+  setDetailZoom(nextScale, event);
+}
+
+function startDetailImagePan(event) {
+  if (!customDetailZoomEnabled() || state.detailZoomScale <= DETAIL_ZOOM_MIN + 0.01) return;
+  if (event.button !== 0 || !(event.target instanceof Element)) return;
+  if (!event.target.closest(".image-stage")) return;
+  event.preventDefault();
+  state.detailPanPointerId = event.pointerId;
+  state.detailPanStartX = event.clientX;
+  state.detailPanStartY = event.clientY;
+  state.detailPanStartScrollLeft = el.modalImageStage.scrollLeft;
+  state.detailPanStartScrollTop = el.modalImageStage.scrollTop;
+  el.modalImageStage.classList.add("is-panning");
+  el.modalImageStage.setPointerCapture?.(event.pointerId);
+}
+
+function moveDetailImagePan(event) {
+  if (state.detailPanPointerId !== event.pointerId) return;
+  event.preventDefault();
+  el.modalImageStage.scrollLeft = state.detailPanStartScrollLeft - (event.clientX - state.detailPanStartX);
+  el.modalImageStage.scrollTop = state.detailPanStartScrollTop - (event.clientY - state.detailPanStartY);
+}
+
+function endDetailImagePan(event) {
+  if (state.detailPanPointerId !== event.pointerId) return;
+  state.detailPanPointerId = null;
+  el.modalImageStage.classList.remove("is-panning");
+  el.modalImageStage.releasePointerCapture?.(event.pointerId);
 }
 
 function setView(view) {
@@ -1093,10 +1244,12 @@ function renderDialog() {
     const modalImage = el.modalImageStage.querySelector("img");
     modalImage.addEventListener("error", () => {
       el.modalImageStage.innerHTML = `<div class="empty-state"><div class="empty-title">图片未找到</div><div>${escapeHtml(image.path || image.url)}</div></div>`;
+      resetDetailZoom();
     }, { once: true });
   } else {
     el.modalImageStage.innerHTML = `<div class="empty-state"><div class="empty-title">无图</div><div>${escapeHtml(item.bookTitle)}</div></div>`;
   }
+  resetDetailZoom();
   el.modalImageStage.scrollTop = 0;
   el.modalImageStage.scrollLeft = 0;
   const total = item.images.length;
@@ -1404,6 +1557,50 @@ async function disableLocalPreviewServiceWorker() {
   }
 }
 
+function reloadOnceForServiceWorkerUpdate() {
+  if (sessionStorage.getItem(SW_RELOAD_KEY) === "1") return;
+  sessionStorage.setItem(SW_RELOAD_KEY, "1");
+  window.location.reload();
+}
+
+function activateWaitingServiceWorker(registration) {
+  if (!registration.waiting || !navigator.serviceWorker.controller) return;
+  registration.waiting.postMessage({ type: "SKIP_WAITING" });
+}
+
+function watchServiceWorkerUpdate(registration) {
+  activateWaitingServiceWorker(registration);
+
+  registration.addEventListener("updatefound", () => {
+    const nextWorker = registration.installing;
+    if (!nextWorker) return;
+
+    nextWorker.addEventListener("statechange", () => {
+      if (nextWorker.state === "installed" && navigator.serviceWorker.controller) {
+        nextWorker.postMessage({ type: "SKIP_WAITING" });
+      }
+    });
+  });
+
+  registration.update().catch(() => {});
+}
+
+async function registerServiceWorker() {
+  if (!("serviceWorker" in navigator) || IS_ANDROID_ASSET || IS_LOCAL_PREVIEW) return;
+
+  const hadController = !!navigator.serviceWorker.controller;
+  let controllerChanged = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController) return;
+    if (controllerChanged) return;
+    controllerChanged = true;
+    reloadOnceForServiceWorkerUpdate();
+  });
+
+  const registration = await navigator.serviceWorker.register("./service-worker.js");
+  watchServiceWorkerUpdate(registration);
+}
+
 el.searchForm.addEventListener("submit", event => {
   event.preventDefault();
   recordSearch(state.query, true);
@@ -1506,6 +1703,15 @@ el.brandEasterTrigger.addEventListener("click", () => {
 el.closeDialog.addEventListener("click", () => el.dialog.close());
 el.prevImage.addEventListener("click", () => changeDetailImage(-1));
 el.nextImage.addEventListener("click", () => changeDetailImage(1));
+el.zoomOut?.addEventListener("click", () => zoomDetailBy(1 / DETAIL_ZOOM_STEP));
+el.zoomReset?.addEventListener("click", resetDetailZoom);
+el.zoomIn?.addEventListener("click", () => zoomDetailBy(DETAIL_ZOOM_STEP));
+el.modalImageStage.addEventListener("wheel", handleDetailZoomWheel, { passive: false });
+el.modalImageStage.addEventListener("dblclick", handleDetailZoomDoubleClick);
+el.modalImageStage.addEventListener("pointerdown", startDetailImagePan);
+el.modalImageStage.addEventListener("pointermove", moveDetailImagePan);
+el.modalImageStage.addEventListener("pointerup", endDetailImagePan);
+el.modalImageStage.addEventListener("pointercancel", endDetailImagePan);
 el.closeEasterDialog.addEventListener("click", () => el.easterDialog.close());
 el.prevEaster.addEventListener("click", () => changeEasterImage(-1));
 el.nextEaster.addEventListener("click", () => changeEasterImage(1));
@@ -1559,6 +1765,6 @@ if (IS_LOCAL_PREVIEW) {
   });
 } else if ("serviceWorker" in navigator && !IS_ANDROID_ASSET) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./service-worker.js").catch(() => {});
+    registerServiceWorker().catch(() => {});
   });
 }

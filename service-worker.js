@@ -1,4 +1,4 @@
-const SHELL_CACHE = "jianbihua-shell-v11";
+const SHELL_CACHE = "jianbihua-shell-v12";
 const IMAGE_CACHE = "jianbihua-images-v1";
 const LEGACY_CACHES = [
   "name-number-lookup-v1",
@@ -123,6 +123,14 @@ self.addEventListener("fetch", event => {
 });
 
 self.addEventListener("message", event => {
-  if (!event.data || event.data.type !== "CLEAR_IMAGE_CACHE") return;
-  event.waitUntil(caches.delete(IMAGE_CACHE));
+  if (!event.data) return;
+
+  if (event.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+    return;
+  }
+
+  if (event.data.type === "CLEAR_IMAGE_CACHE") {
+    event.waitUntil(caches.delete(IMAGE_CACHE));
+  }
 });
