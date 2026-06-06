@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "appId": "com.jianbihua.app",
   "appName": "简笔画",
+  "contactEmail": "1955225082@qq.com",
   "versionCode": 4,
   "versionName": "0.2.2",
   "channel": "local-debug",

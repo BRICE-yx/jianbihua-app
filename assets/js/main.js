@@ -806,18 +806,19 @@ function getSpecialResults(query) {
 function renderResults() {
   const query = state.query.trim();
   if (!query) {
-    el.resultsTitle.textContent = "快速入口";
+    el.resultsTitle.textContent =  "";//"快速入口";
     el.resultsSummary.textContent = "";
     const recent = state.stats.recentQueries.slice(0, 6);
     const terms = recent.length ? recent.map(entry => entry.term) : DEFAULT_TERMS;
-    el.results.innerHTML = `
+    el.results.innerHTML = "";
+    /*el.results.innerHTML = `
       <div class="empty-state">
         <div class="empty-title">最近</div>
         <div class="toolbar">
           ${terms.map(term => `<button class="chip" type="button" data-search-term="${escapeHtml(term)}">${escapeHtml(term)}</button>`).join("")}
         </div>
       </div>
-    `;
+    `;*/
     return;
   }
 
@@ -955,11 +956,13 @@ function renderSettings() {
   el.cacheAll.title = IS_ANDROID_ASSET ? "APK 已内置图片，点击可恢复状态提示" : "";
   el.appStatus.innerHTML = `
     <div>${escapeHtml(versionLine)}</div>
-    <div>数据：${escapeHtml(state.data?.sourceName || "")}</div>
-    <div>模式：${escapeHtml(state.data?.assetMode || "")}${state.data?.temporary ? " · 临时" : ""}${IS_ANDROID_ASSET ? " · APK 内置资源" : ""}</div>
-    <div>生成：${escapeHtml(generatedAt)}</div>
     <div>图片：${formatNumber(stats.images || 0)} · ${escapeHtml(imageBytes)}</div>
-    <div>更新：${escapeHtml(state.appVersion?.updateManifestUrl || "未配置远程地址")}</div>
+    <div hidden>数据：${escapeHtml(state.data?.sourceName || "")}</div>
+    <div hidden>模式：${escapeHtml(state.data?.assetMode || "")}${state.data?.temporary ? " · 临时" : ""}${IS_ANDROID_ASSET ? " · APK 内置资源" : ""}</div>
+    <div>发行时间：${escapeHtml(generatedAt)}</div>
+    <div>网址：${escapeHtml(state.appVersion?.webUrl || "未配置远程地址")}</div>
+    <div>联系我们：${escapeHtml(state.appVersion?.contactEmail || "未配置联系邮箱")}</div>
+    <div class="disclaimer">仅供个人学习与非商用使用，非公开发行版本。</div>
   `;
   renderStats();
 }
@@ -1008,13 +1011,18 @@ function modalScrollTarget(target) {
   return scrollTarget && dialog.contains(scrollTarget) ? scrollTarget : null;
 }
 
-function shouldBlockModalScroll(deltaY, scrollTarget) {
-  if (!scrollTarget || Math.abs(deltaY) < 0.5) return true;
+function canScrollByDelta(delta, current, max) {
+  if (!Number.isFinite(delta) || Math.abs(delta) < 0.5 || max <= 1) return false;
+  return delta < 0 ? current > 0 : current < max - 1;
+}
+
+function shouldBlockModalScroll(deltaY, scrollTarget, deltaX = 0) {
+  if (!scrollTarget) return true;
   const maxScrollTop = scrollTarget.scrollHeight - scrollTarget.clientHeight;
-  if (maxScrollTop <= 1) return true;
-  if (deltaY < 0 && scrollTarget.scrollTop <= 0) return true;
-  if (deltaY > 0 && scrollTarget.scrollTop >= maxScrollTop - 1) return true;
-  return false;
+  const maxScrollLeft = scrollTarget.scrollWidth - scrollTarget.clientWidth;
+  const canScrollY = canScrollByDelta(deltaY, scrollTarget.scrollTop, maxScrollTop);
+  const canScrollX = canScrollByDelta(deltaX, scrollTarget.scrollLeft, maxScrollLeft);
+  return !(canScrollX || canScrollY);
 }
 
 function trapModalWheel(event) {
@@ -1022,7 +1030,7 @@ function trapModalWheel(event) {
   if (!dialog) return;
   if (event.ctrlKey || event.metaKey) return;
   const scrollTarget = modalScrollTarget(event.target);
-  if (!dialog.contains(event.target) || shouldBlockModalScroll(event.deltaY, scrollTarget)) {
+  if (!dialog.contains(event.target) || shouldBlockModalScroll(event.deltaY, scrollTarget, event.deltaX)) {
     event.preventDefault();
   }
 }
